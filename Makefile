@@ -71,6 +71,7 @@ $(RELEASEDIR):
 
 .PHONY: iso
 iso $(SRCISO): .dockerbuild $(PATCHES)
+	@mkdir -p $(BUILDDIR)
 	$(DOCKERCMD) ./build-vyos-image --architecture $(ARCH) --build-by "$(BUILDER)" --version $(RELEASE) --build-type release --custom-package vyos-1x-smoketest iso | tee $(BUILDDIR)/build.log
 
 vyos-build/data/live-build-config/hooks/live/%.chroot: ./%.chroot
