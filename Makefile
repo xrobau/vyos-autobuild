@@ -1,8 +1,9 @@
 SHELL=/bin/bash
 BUILDREPO=https://github.com/vyos/vyos-build
 
-# These scripts are added to the build hooks
-PATCHES=vyos-build/data/live-build-config/hooks/live/50-zerotier.chroot vyos-build/data/live-build-config/hooks/live/55-fix-vbash.chroot
+# Anything in the current directory called *.chroot will be added to the
+# live hooks to patch the default build
+PATCHES=$(wildcard *.chroot)
 
 ARCH=amd64
 BUILDER=xrobau@gmail.com
@@ -13,6 +14,7 @@ RELEASEDIR=releases/$(RELEASE)
 ISOFILE=vyos-$(RELEASE)-$(ARCH).iso
 SRCISO=$(BUILDDIR)/$(ISOFILE)
 DOCKERCMD=docker run --rm -it --privileged -v $(shell pwd)/vyos-build:/vyos -w /vyos vyos/vyos-build:current
+LIVEPATCHES=$(addprefix vyos-build/data/live-build-config/hooks/live/,$(PATCHES))
 
 help: vyos-build/.git/config
 	@echo 'Usage:'
@@ -34,7 +36,9 @@ help: vyos-build/.git/config
 	@echo 'make redocker:     Forces a rebuild of the docker contaner'
 	@echo 'make forcedocker:  Forces a rebuild of the docker contaner, disabling'
 	@echo '                   the docker build cache.'
-	@echo 'make shell:        Launches a shell in the docker container'
+	@echo 'make shell:        Launches a shell in the docker build container'
+	@echo 'make debug:        Launches a shell in the built chroot. Be careful to'
+	@echo '                   make sure everything is correctly unmounted on exit'
 	@echo ''
 
 USECACHE=
@@ -54,6 +58,17 @@ redocker .dockerbuild: vyos-build/.git/config vyos-build/docker/Dockerfile
 release: $(RELEASEDIR) $(RELEASEDIR)/$(ISOFILE) $(RELEASEDIR)/raw.packages $(RELEASEDIR)/build.log $(RELEASEDIR)/dpkg.dump
 	@ls -al $(RELEASEDIR)/*
 
+.PHONY: debug
+debug: vyos-build/build/chroot
+	@mount -t proc none $</proc
+	@mount -t sysfs none $</sys
+	@mount -t devtmpfs  none $</dev
+	@mount -t devpts  none $</dev/pts
+	chroot $< /bin/bash || :
+	@umount $</proc $</sys $</dev/pts $</dev
+	@echo "If this errors with  'not mounted', it's not a problem, as it is auto-mounted when you try to use networking"
+	umount $</run/cgroup2 || :
+
 $(RELEASEDIR)/dpkg.dump:
 	@chroot $(BUILDDIR)/chroot dpkg -l > $@
 
@@ -70,11 +85,12 @@ $(RELEASEDIR):
 	@mkdir -p $@
 
 .PHONY: iso
-iso $(SRCISO): .dockerbuild $(PATCHES)
+iso $(SRCISO): .dockerbuild $(LIVEPATCHES)
 	@mkdir -p $(BUILDDIR)
 	$(DOCKERCMD) ./build-vyos-image --architecture $(ARCH) --build-by "$(BUILDER)" --version $(RELEASE) --build-type release --custom-package vyos-1x-smoketest iso | tee $(BUILDDIR)/build.log
 
-vyos-build/data/live-build-config/hooks/live/%.chroot: ./%.chroot
+vyos-build/data/live-build-config/hooks/live/%: ./%
+	@echo Updating $@
 	@cp $< $@
 
 vyos-build/.git/config:

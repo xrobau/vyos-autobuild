@@ -1,0 +1,4 @@
+#!/bin/sh
+
+tar zcvf etc/apt-backup.tgz etc/apt
+

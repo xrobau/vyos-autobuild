@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Temporarily disable changes from
+#   https://github.com/vyos/vyos-1x/commit/64d323299586da646ca847e78255ff2cd8464578
+# which breaks login
+
+sed -i 's/boot_configuration_complete()/True/' usr/libexec/vyos/conf_mode/system-login.py
+
