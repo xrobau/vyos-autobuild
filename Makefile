@@ -157,7 +157,7 @@ $(GHDIR)/.release: $(GHDIR) set-ghreleasevar set-authtoken
 		fi; \
 	fi
 
-$(GHDIR)/.release.json: $(GHDIR)
+$(GHDIR)/.release.json: $(GHDIR)/.release
 	@if [ "$$(curl -sw '%{http_code}' -o $(GHDIR)/.release.json $(CURLPARAMS) $(RELEASEURL)/tags/$(GHRELEASE))" != "200" ]; then \
 		echo 'Error, can not get release.json'; rm -f $@; exit 1; \
 	fi
