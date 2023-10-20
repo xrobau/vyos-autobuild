@@ -1,7 +1,7 @@
 #!/bin/sh
 
-# Install real vim and wget to avoid using busybox alternatives
-apt-get -y install vim wget
+# Install real vim and wget to avoid using busybox alternatives, and install tracepath, too
+apt-get -y install vim wget iputils-tracepath
 
 # Don't use a poor substitude for the real traceroute
 mv /opt/vyatta/share/vyatta-op/templates/traceroute /opt/vyatta/share/vyatta-op/templates/vtraceroute

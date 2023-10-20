@@ -39,6 +39,8 @@ help: vyos-build/.git/config
 	@echo 'make shell:        Launches a shell in the docker build container'
 	@echo 'make debug:        Launches a shell in the built chroot. Be careful to'
 	@echo '                   make sure everything is correctly unmounted on exit'
+	@echo 'make push:         Push the build in $(RELEASEDIR) to github, if you are xrobau'
+	@echo 'make inc-ghrel:    Update/incrememnt the github release tag if needed'
 	@echo ''
 
 USECACHE=
@@ -55,7 +57,8 @@ redocker .dockerbuild: vyos-build/.git/config vyos-build/docker/Dockerfile
 	touch .dockerbuild
 
 .PHONY: release
-release: $(RELEASEDIR) $(RELEASEDIR)/$(ISOFILE) $(RELEASEDIR)/raw.packages $(RELEASEDIR)/build.log $(RELEASEDIR)/dpkg.dump
+ASSETS=$(ISOFILE) raw.packages build.log dpkg.dump
+release: $(RELEASEDIR) $(addprefix $(RELEASEDIR)/,$(ASSETS))
 	@ls -al $(RELEASEDIR)/*
 
 .PHONY: debug
@@ -103,14 +106,92 @@ update: vyos-build/.git/config
 .PHONY: clean
 clean: .dockerbuild
 	$(DOCKERCMD) make clean
-	rm -rf $(RELEASEDIR)
+	rm -rf $(RELEASEDIR) github
 
 .PHONY: distclean
 distclean:
-	rm -rf .dockerbuild vyos-build releases
+	rm -rf .dockerbuild vyos-build releases github .lastbuild .buildnumber
 
 # Debugging inside the docker-build container
 .PHONY: shell
 shell: .dockerbuild
 	$(DOCKERCMD) bash
+
+## Pushing releases to github
+REPOOWNER=xrobau
+REPONAME=vyos-autobuild
+RELEASEDATA='{"tag_name":"$(GHRELEASE)","target_commitish":"master","name":"$(GHRELEASE)","body":"Auto-created release from $(RELEASE)","draft":false,"prerelease":false,"generate_release_notes":false}'
+RELEASEURL=https://api.github.com/repos/$(REPOOWNER)/$(REPONAME)/releases
+UPLOADURL=https://uploads.github.com/repos/$(REPOOWNER)/$(REPONAME)/releases/$(RELEASEID)/assets
+CURLPARAMS=-L -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $(AUTHTOKEN)" -H "X-GitHub-Api-Version: 2022-11-28"
+GHDIR=github
+
+.PHONY: push
+push: .authtoken set-ghreleasevar set-authtoken tag-release upload-assets
+
+.PHONY: upload-assets
+upload-assets: set-ghreleasevar set-authtoken tag-release set-releaseid
+	@echo Uploading $(addprefix $(GHDIR)/,$(ASSETS))
+	@$(MAKE) RELEASEID=$(RELEASEID) set-authtoken $(addprefix $(GHDIR)/,$(ASSETS))
+
+.PHONY: tag-release
+tag-release: $(GHDIR)/.release
+
+set-releaseid: set-ghreleasevar set-authtoken $(GHDIR)/.release.json
+	@$(eval RELEASEID=$(shell jq -r .id $(GHDIR)/.release.json))
+	@echo Found Release ID $(RELEASEID)
+
+$(GHDIR):
+	mkdir -p $(GHDIR)
+
+.PHONY: $(GHDIR)/.release
+$(GHDIR)/.release: $(GHDIR) set-ghreleasevar set-authtoken
+	@if git diff --exit-code > /dev/null; then echo 'No changes in git repo'; else echo 'There are changes, commit them'; exit 1; fi
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(GHRELEASE)" ]; then \
+		rm -f $(GHDIR)/.release.json $(addprefix $(GHDIR)/,$(ASSETS)); \
+		if [ "$$(curl -sw '%{http_code}' -o $(GHDIR)/.release.json $(CURLPARAMS) $(RELEASEURL)/tags/$(GHRELEASE))" == "404" ]; then \
+			echo 'Creating $(GHRELEASE) on github'; \
+			curl -s -X POST $(CURLPARAMS) $(RELEASEURL) -d $(RELEASEDATA) > $@.debug && echo $(GHRELEASE) > $@; \
+		else \
+			echo 'Odd, release exists in github, but not in .release'; echo $(GHRELEASE) > $@; \
+		fi; \
+	fi
+
+$(GHDIR)/.release.json: $(GHDIR)
+	@if [ "$$(curl -sw '%{http_code}' -o $(GHDIR)/.release.json $(CURLPARAMS) $(RELEASEURL)/tags/$(GHRELEASE))" != "200" ]; then \
+		echo 'Error, can not get release.json'; rm -f $@; exit 1; \
+	fi
+
+$(GHDIR)/%: $(RELEASEDIR)/%
+	@echo 'Uploading $(@F) to Github...'
+	@curl -X POST $(CURLPARAMS) -H "Content-Type: application/octet-stream" $(UPLOADURL)?name=$(@F) --data-binary "@$<" && ln -f $< $@
+
+
+.PHONY: set-authtoken
+set-authtoken: .authtoken
+	$(eval AUTHTOKEN=$(shell cat .authtoken))
+
+.authtoken:
+	@echo 'Create an auth token at https://github.com/settings/tokens and then enter it here'
+	@read -e -p "Please paste token: " p; [ "$$p" ] && echo $$p > .authtoken || echo 'No token provided'
+
+# Build date for tagging builds
+DATESTAMP:=$(shell date --utc +'%Y%m%d')
+.lastbuild:
+	@echo $(DATESTAMP) > .lastbuild
+
+# Build number default
+.buildnumber:
+	@echo 1 > .buildnumber
+
+# Set GHRELEASE (will auto-update when the day changes)
+set-ghreleasevar: .lastbuild .buildnumber
+	@[ "$$(cat .lastbuild)" != "$(DATESTAMP)" ] && echo $(DATESTAMP) > .lastbuild && echo 1 > .buildnumber || :
+	$(eval GHRELEASE=$(shell cat .lastbuild)-$(shell cat .buildnumber))
+	@echo GHRELEASE is $(GHRELEASE)
+
+# Increment GHRELEASE
+increment-ghrel: .lastbuild .buildnumber
+	@[ "$$(cat .lastbuild)" != "$(DATESTAMP)" ] && echo $(DATESTAMP) > .lastbuild && echo 0 > .buildnumber || :
+	@echo $$(( $$(cat .buildnumber) + 1 )) > .buildnumber
 

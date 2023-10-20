@@ -1,3 +1,7 @@
 vyos-build
 .dockerbuild
 releases
+.authtoken
+.buildnumber
+.lastbuild
+github
