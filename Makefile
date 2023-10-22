@@ -8,15 +8,19 @@ PATCHES=$(wildcard *.chroot)
 ARCH=amd64
 BUILDER=xrobau@gmail.com
 
-RELEASE=1.4-$(shell date -u '+%Y-%m-%d')
-BUILDDIR=vyos-build/build
+# VERSION is set by get-vyosversion
+RELEASE=$(VERSION)-$(shell date -u '+%Y-%m-%d')
 RELEASEDIR=releases/$(RELEASE)
 ISOFILE=vyos-$(RELEASE)-$(ARCH).iso
+BUILDDIR=vyos-build/build
 SRCISO=$(BUILDDIR)/$(ISOFILE)
 DOCKERCMD=docker run --rm -it --privileged -v $(shell pwd)/vyos-build:/vyos -w /vyos vyos/vyos-build:current
 LIVEPATCHES=$(addprefix vyos-build/data/live-build-config/hooks/live/,$(PATCHES))
 
-help: vyos-build/.git/config
+help: get-vyosversion vyos-build/.git/config
+	@echo ''
+	@echo '*** You are building a VyOS $(VERSIONNAME) ($(VERSION)) release. ***'
+	@echo ''
 	@echo 'Usage:'
 	@echo ''
 	@echo '  `make update` and then `make release` is usually sufficient for everything'
@@ -29,6 +33,13 @@ help: vyos-build/.git/config
 	@echo 'make release:      Builds everything, and puts it all in $(RELEASEDIR)'
 	@echo 'make clean:        Asks the vyos-build repo to clean itself up'
 	@echo 'make distclean:    Deletes everything, does not ask'
+	@echo ''
+	@echo 'Releases:'
+	@echo ''
+	@echo 'make v13:          Switch to "equuleus" build branch'
+	@echo 'make v14:          Switch to "sagitta" build branch'
+	@echo 'make circinus:     Switch to "circinus" build branch'
+	@echo 'make current:      Switch to "current" build branch (currently circinus)'
 	@echo ''
 	@echo 'Other tools:'
 	@echo 'make iso:          Builds a VyOS iso, even if it already exists'
@@ -48,11 +59,23 @@ USECACHE=
 forcedocker: USECACHE=--no-cache
 forcedocker: redocker
 
+.PHONY: get-vyosversion
+get-vyosversion: .vyosversion
+	@$(eval VERSION=$(shell cat $<))
+	@$(eval VERSIONNAME=$(shell cat .vyosname))
+
+.vyosversion: .vyosname
+	@jq -r .$(shell cat $<) vyos-build/data/versions >$@
+
+.vyosname: vyos-build/data/versions
+	@jq -r 'keys[0]' < $< > $@
+
+vyos-build/data/versions: vyos-build/.git/config
 .PHONY: docker
 docker: .dockerbuild
 
 .PHONY: redocker
-redocker .dockerbuild: vyos-build/.git/config vyos-build/docker/Dockerfile
+redocker .dockerbuild: .vyosversion vyos-build/docker/Dockerfile | get-vyosversion
 	cd vyos-build && docker build $(USECACHE) -t vyos/vyos-build:current docker
 	touch .dockerbuild
 
@@ -194,4 +217,14 @@ set-ghreleasevar: .lastbuild .buildnumber
 increment-ghrel: .lastbuild .buildnumber
 	@[ "$$(cat .lastbuild)" != "$(DATESTAMP)" ] && echo $(DATESTAMP) > .lastbuild && echo 0 > .buildnumber || :
 	@echo $$(( $$(cat .buildnumber) + 1 )) > .buildnumber
+
+### Releases
+ALLVERS=v13 v14 circinus current
+.PHONY: $(ALLVERS)
+GITVER-v13=equuleus
+GITVER-v14=sagitta
+GITVER-circinus=current
+GITVER-current=current
+$(ALLVERS): vyos-build/.git/config
+	@BR=$(GITVER-$@); [ "$$BR" ] && (cd vyos-build && git clean -f -d; git fetch; git checkout $$BR; rm -f .vyosname .vyosversion) || (echo 'Bug asking for branch $@'; exit 1)
 
