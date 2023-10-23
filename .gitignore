@@ -1,5 +1,5 @@
 vyos-build
-.dockerbuild
+.dockerbuild*
 releases
 .authtoken
 .buildnumber

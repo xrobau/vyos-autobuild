@@ -8,13 +8,17 @@ PATCHES=$(wildcard *.chroot)
 ARCH=amd64
 BUILDER=xrobau@gmail.com
 
-# VERSION is set by get-vyosversion
+# Update this if needed
+DEBMIRROR=--debian-mirror=http://ftp.au.debian.org/debian/
+
+# VERSION and VERSIONNAME are updated by get-vyosversion, but are here to catch defaults
+VERSION=$(shell cat .vyosversion 2>/dev/null || echo 'unknown')
+VERSIONNAME=$(shell cat .vyosname 2>/dev/null || echo 'debug')
 RELEASE=$(VERSION)-$(shell date -u '+%Y-%m-%d')
 RELEASEDIR=releases/$(RELEASE)
 ISOFILE=vyos-$(RELEASE)-$(ARCH).iso
 BUILDDIR=vyos-build/build
 SRCISO=$(BUILDDIR)/$(ISOFILE)
-DOCKERCMD=docker run --rm -it --privileged -v $(shell pwd)/vyos-build:/vyos -w /vyos vyos/vyos-build:current
 LIVEPATCHES=$(addprefix vyos-build/data/live-build-config/hooks/live/,$(PATCHES))
 
 help: get-vyosversion vyos-build/.git/config
@@ -32,6 +36,7 @@ help: get-vyosversion vyos-build/.git/config
 	@echo 'make iso:          Builds a VyOS iso'
 	@echo 'make release:      Builds everything, and puts it all in $(RELEASEDIR)'
 	@echo 'make clean:        Asks the vyos-build repo to clean itself up'
+	@echo 'make cleancache:   Same as make clean, but also deletes apt cache'
 	@echo 'make distclean:    Deletes everything, does not ask'
 	@echo ''
 	@echo 'Releases:'
@@ -72,16 +77,18 @@ get-vyosversion: .vyosversion
 
 vyos-build/data/versions: vyos-build/.git/config
 .PHONY: docker
-docker: .dockerbuild
+docker: .dockerbuild-$(VERSIONNAME)
+
+DOCKERCMD=docker run --rm -it --privileged -v $(shell pwd)/vyos-build:/vyos -w /vyos vyos/vyos-build:$(VERSIONNAME)
 
 .PHONY: redocker
-redocker .dockerbuild: .vyosversion vyos-build/docker/Dockerfile | get-vyosversion
-	cd vyos-build && docker build $(USECACHE) -t vyos/vyos-build:current docker
-	touch .dockerbuild
+redocker .dockerbuild-$(VERSIONNAME): .vyosversion vyos-build/docker/Dockerfile | get-vyosversion
+	cd vyos-build && docker build $(USECACHE) -t vyos/vyos-build:$(VERSIONNAME) docker
+	touch .dockerbuild-$(VERSIONNAME)
 
 .PHONY: release
 ASSETS=$(ISOFILE) raw.packages build.log dpkg.dump
-release: $(RELEASEDIR) $(addprefix $(RELEASEDIR)/,$(ASSETS))
+release: $(RELEASEDIR) $(addprefix $(RELEASEDIR)/,$(ASSETS)) | get-vyosversion
 	@ls -al $(RELEASEDIR)/*
 
 .PHONY: debug
@@ -107,13 +114,13 @@ $(RELEASEDIR)/raw.packages: $(BUILDDIR)/live-image-$(ARCH).packages
 $(RELEASEDIR)/build.log: $(BUILDDIR)/build.log
 	@cp $< $@
 
-$(RELEASEDIR):
+$(RELEASEDIR): | get-vyosversion
 	@mkdir -p $@
 
 .PHONY: iso
-iso $(SRCISO): .dockerbuild $(LIVEPATCHES)
+iso $(SRCISO): .dockerbuild-$(VERSIONNAME) $(LIVEPATCHES)
 	@mkdir -p $(BUILDDIR)
-	$(DOCKERCMD) ./build-vyos-image --architecture $(ARCH) --build-by "$(BUILDER)" --version $(RELEASE) --build-type release --custom-package vyos-1x-smoketest iso | tee $(BUILDDIR)/build.log
+	$(DOCKERCMD) ./build-vyos-image $(DEBMIRROR) --architecture $(ARCH) --build-by "$(BUILDER)" --version $(RELEASE) --build-type release --custom-package vyos-1x-smoketest iso | tee $(BUILDDIR)/build.log
 
 vyos-build/data/live-build-config/hooks/live/%: ./%
 	@echo Updating $@
@@ -125,19 +132,24 @@ vyos-build/.git/config:
 .PHONY: update
 update: vyos-build/.git/config
 	cd vyos-build && git pull
+	rm -f .vyosname .vyosversion && $(MAKE) get-vyosversion
 
+CACHEDIR=
+.PHONY: cleancache
+cleancache: CACHEDIR=vyos-build/build/cache
+cleancache: clean
 .PHONY: clean
-clean: .dockerbuild
+clean: .dockerbuild-$(VERSIONNAME)
 	$(DOCKERCMD) make clean
-	rm -rf $(RELEASEDIR) github
+	rm -rf $(CACHEDIR) $(RELEASEDIR) github
 
 .PHONY: distclean
 distclean:
-	rm -rf .dockerbuild vyos-build releases github .lastbuild .buildnumber
+	rm -rf .dockerbuild* .vyosname .vyosversion vyos-build releases github .lastbuild .buildnumber
 
 # Debugging inside the docker-build container
 .PHONY: shell
-shell: .dockerbuild
+shell: .dockerbuild-$(VERSIONNAME)
 	$(DOCKERCMD) bash
 
 ## Pushing releases to github
@@ -226,5 +238,6 @@ GITVER-v14=sagitta
 GITVER-circinus=current
 GITVER-current=current
 $(ALLVERS): vyos-build/.git/config
-	@BR=$(GITVER-$@); [ "$$BR" ] && (cd vyos-build && git clean -f -d; git fetch; git checkout $$BR; rm -f .vyosname .vyosversion) || (echo 'Bug asking for branch $@'; exit 1)
+	@BR=$(GITVER-$@); [ "$$BR" ] && (cd vyos-build && git clean -f -d; git fetch; git checkout $$BR) || (echo 'Bug asking for branch $@'; exit 1)
+	@rm -f .vyosname .vyosversion; $(MAKE) get-vyosversion
 
