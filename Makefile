@@ -87,7 +87,8 @@ redocker .dockerbuild-$(VERSIONNAME): .vyosversion vyos-build/docker/Dockerfile 
 	touch .dockerbuild-$(VERSIONNAME)
 
 .PHONY: release
-ASSETS=$(ISOFILE) raw.packages build.log dpkg.dump
+META=raw.packages build.log dpkg.dump
+ASSETS=$(ISOFILE) $(META)
 release: $(RELEASEDIR) $(addprefix $(RELEASEDIR)/,$(ASSETS)) | get-vyosversion
 	@ls -al $(RELEASEDIR)/*
 
@@ -131,6 +132,7 @@ vyos-build/.git/config:
 
 .PHONY: update
 update: vyos-build/.git/config
+	@rm -f $(addprefix $(GHDIR)/,$(META))
 	cd vyos-build && git pull
 	rm -f .vyosname .vyosversion && $(MAKE) get-vyosversion
 
