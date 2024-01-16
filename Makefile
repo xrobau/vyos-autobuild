@@ -21,7 +21,11 @@ BUILDDIR=vyos-build/build
 SRCISO=$(BUILDDIR)/$(ISOFILE)
 LIVEPATCHES=$(addprefix vyos-build/data/live-build-config/hooks/live/,$(PATCHES))
 
-help: get-vyosversion vyos-build/.git/config
+# If somehow jq or git live somewhere else on your machine, change these to suit
+JQLOC=/usr/bin/jq
+GITLOC=/usr/bin/git
+
+help: get-vyosversion vyos-build/.git/config | $(JQLOC) $(GITLOC)
 	@echo ''
 	@echo '*** You are building a VyOS $(VERSIONNAME) ($(VERSION)) release. ***'
 	@echo ''
@@ -65,8 +69,8 @@ forcedocker: USECACHE=--no-cache
 forcedocker: redocker
 
 .PHONY: get-vyosversion
-get-vyosversion: .vyosversion
-	@$(eval VERSION=$(shell cat $<))
+get-vyosversion: .vyosversion | $(JQLOC) $(GITLOC)
+	@$(eval VERSION=$(shell cat .vyosversion))
 	@$(eval VERSIONNAME=$(shell cat .vyosname))
 
 .vyosversion: .vyosname
@@ -127,7 +131,7 @@ vyos-build/data/live-build-config/hooks/live/%: ./%
 	@echo Updating $@
 	@cp $< $@
 
-vyos-build/.git/config:
+vyos-build/.git/config: | $(GITLOC)
 	git clone $(BUILDREPO)
 
 .PHONY: update
@@ -182,7 +186,7 @@ $(GHDIR):
 	mkdir -p $(GHDIR)
 
 .PHONY: $(GHDIR)/.release
-$(GHDIR)/.release: $(GHDIR) set-ghreleasevar set-authtoken
+$(GHDIR)/.release: $(GHDIR) set-ghreleasevar set-authtoken | $(GITLOC)
 	@if git diff --exit-code > /dev/null; then echo 'No changes in git repo'; else echo 'There are changes, commit them'; exit 1; fi
 	@if [ "$$(cat $@ 2>/dev/null)" != "$(GHRELEASE)" ]; then \
 		rm -f $(GHDIR)/.release.json $(addprefix $(GHDIR)/,$(ASSETS)); \
@@ -242,4 +246,11 @@ GITVER-current=current
 $(ALLVERS): vyos-build/.git/config
 	@BR=$(GITVER-$@); [ "$$BR" ] && (cd vyos-build && git clean -f -d; git fetch; git checkout $$BR) || (echo 'Bug asking for branch $@'; exit 1)
 	@rm -f .vyosname .vyosversion; $(MAKE) get-vyosversion
+
+
+### JQ and git need to exist
+$(JQLOC):
+	@echo "The 'jq' utility can not be found at $(JQLOC), please install it. If it is installed, update the 'JQLOC' setting in this Makefile"; exit 1
+$(GITLOC):
+	@echo "The 'git' tool can not be found at $(GITLOC), please install it. If it is installed, update the 'GITLOC' setting in this Makefile"; exit 1
 
