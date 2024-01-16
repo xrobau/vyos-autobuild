@@ -12,8 +12,8 @@ BUILDER=xrobau@gmail.com
 DEBMIRROR=--debian-mirror=http://ftp.au.debian.org/debian/
 
 # VERSION and VERSIONNAME are updated by get-vyosversion, but are here to catch defaults
-VERSION=$(shell cat .vyosversion 2>/dev/null || echo 'unknown')
-VERSIONNAME=$(shell cat .vyosname 2>/dev/null || echo 'debug')
+VERSION=$(shell cat .vyosversion 2>/dev/null || echo -n 'unknown')
+VERSIONNAME=$(shell cat .vyosname 2>/dev/null || echo -n 'debug')
 RELEASE=$(VERSION)-$(shell date -u '+%Y-%m-%d')
 RELEASEDIR=releases/$(RELEASE)
 ISOFILE=vyos-$(RELEASE)-$(ARCH).iso
