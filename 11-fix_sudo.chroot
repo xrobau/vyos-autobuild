@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# This is a hook due to the way the vyos-autobuild script works.
+# It could just as easily be added to the chroot via other means.
+
+cat > /etc/sudoers.d/disable-fqdn << EOF
+# Disable fqdn lookups on VyOS. There is never a  need for it,
+# as all entries will always be for 'ALL' hosts.
+
+Defaults !fqdn
+
+EOF
+
+# Local Variables:
+# mode: shell-script
+# sh-indentation: 4
+# End:
